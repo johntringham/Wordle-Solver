@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace WordleSolver
 {
@@ -8,69 +10,100 @@ namespace WordleSolver
     {
         static void Main(string[] args)
         {
-            bool oneGame = true;
+            bool oneGame = false;
 
             if (oneGame)
             {
-                var game = new Game(true);
+                var game = new Game(true, "taste");
                 var run = game.Run();
             }
             else
             {
-                List<int> results = new List<int>();
-                for (int i = 0; i < 100; i++)
+                ConcurrentBag<Game> results = new ConcurrentBag<Game>();
+                Parallel.For(0, Words.Solutions.Length / 3, (i) =>
                 {
-                    var game = new Game(false);
+                    var solutionIndex = i * 3;
+                    //if (solutionIndex == -1)
+                    //{
+                    //    solution = Words.Solutions.SelectRandom();
+                    //}
+                    //else
+                    //{
+                       var solution = Words.Solutions[solutionIndex % Words.Solutions.Length];
+                    //}
+
+                    var game = new Game(false, solution);
                     var run = game.Run();
-                    results.Add(run);
-                }
+                    results.Add(game);
+                });
 
-                Console.WriteLine("Average:" + results.Average());
+                Console.WriteLine("Average:" + results.Select(g => g.steps).Average());
 
-                var numberBeaten = results.Where(r => r <= 6).Count();
+                var numberBeaten = results.Where(r => r.steps <= 6).Count();
                 Console.WriteLine("% beaten:" + ((100f * numberBeaten) / results.Count));
+
+                Console.WriteLine("Logs for lost games:");
+                var lost = results.Where(r => r.steps > 5);
+                foreach (var lostGame in lost)
+                {
+                    foreach (var logEntry in lostGame.Log)
+                    {
+                        Console.WriteLine(logEntry);
+                    }
+                }
             }
         }
     }
 
     public class Game
     {
-        private Random random = new Random();
-
         private string solution;
 
         private char[] knownPlaces = "-----".ToCharArray();
         private HashSet<char> unpositionedLetters = new HashSet<char>();
         private HashSet<char> excludedLetters = new HashSet<char>();
 
-        public List<string> potentialSolutions;
+        private HashSet<char>[] notInThisPositionLetters = new HashSet<char>[6] {
+            new HashSet<char>(),
+            new HashSet<char>(),
+            new HashSet<char>(),
+            new HashSet<char>(),
+            new HashSet<char>(),
+            new HashSet<char>(),
+        };
+
+        public HashSet<string> guesses = new HashSet<string>();
+
+        public HashSet<string> potentialSolutions;
         private bool shouldPrint;
 
-        private List<string> log = new List<string>();
+        public List<string> Log = new List<string>();
 
-        public Game(bool shouldPrint)
+        public Game(bool shouldPrint, string solution)
         {
             this.shouldPrint = shouldPrint;
+            this.solution = solution;
         }
+
+        public int steps = 0;
 
         public int Run()
         {
-            potentialSolutions = Words.Solutions.ToList();
-            solution = Words.Solutions.SelectRandom();
+            potentialSolutions = Words.Solutions.ToHashSet();
 
             Print("Solution is " + solution + "\n\n\n");
 
             for (int i = 0; i < 10; i++)
             {
-                var guessWord = ChooseGuess();
+                steps++;
+                var guessWord = i == 0 ? "oater" : ChooseGuess();
 
                 var correct = Guess(guessWord);
                 if (correct)
                 {
                     Print("Correct! Word is " + guessWord);
-                    Print("Got it in " + (i + 1) + " guesses");
+                    Print("Got it in " + (i + 1) + " guesses\n------------------------------------------------------------\n");
 
-                    return i + 1;
                     break;
                 }
                 else
@@ -80,7 +113,7 @@ namespace WordleSolver
                 }
             }
 
-            return 11;
+            return steps;
         }
 
         private string ChooseGuess()
@@ -91,15 +124,21 @@ namespace WordleSolver
             }
 
             var bestWord = "";
-            var bestScore = 0;
+            var bestScore = -10000;
             foreach(var word in Words.allWords)
             {
                 var score = 0;
-                if (word.Any(c => excludedLetters.Contains(c))) continue;
+                //if (word.Any(c => excludedLetters.Contains(c))) score -= 1;
+                if (guesses.Contains(word)) continue;
 
                 foreach (var potential in this.potentialSolutions)
                 {
                     score += CompareWords(potential, word);
+
+                    if(potential == word)
+                    {
+                        score += 1;
+                    }
                 }
 
                 if (score > bestScore)
@@ -114,13 +153,36 @@ namespace WordleSolver
 
         public int CompareWords(string a, string b)
         {
-            var differentLetters = a.Intersect(b);
-            return differentLetters.Count();
+            return a.Intersect(b).Except(knownPlaces).Count();
+
+            //var h = new HashSet<char>(a);
+
+
+            //foreach (char c in a + b)
+            //{
+            //    h.Add(c);
+            //}
+
+            //var count = 0;
+            //foreach (var c in knownPlaces)
+            //{
+            //    if (c == '-') continue;
+            //    if (h.Contains(c))
+            //    {
+            //        count++;
+            //    }
+            //}
+
+            //return h.Count();// 2 * h.Count() - (count);
+            //var differentLetters = a.Intersect(b).ToArray();
+            //var except = (a + b).Intersect(knownPlaces).ToArray();
+
+            //return (differentLetters.Length) - (except.Length * 2);
         }
 
         private void FilterWords()
         {
-            var filteredPotentialWords = potentialSolutions.Where(w => FilterGuess(w)).ToList();
+            var filteredPotentialWords = potentialSolutions.Where(w => FilterGuess(w)).ToHashSet();
 
             potentialSolutions = filteredPotentialWords;
         }
@@ -132,6 +194,11 @@ namespace WordleSolver
             {
                 char w = word[i];
                 if(excludedLetters.Contains(w)) { return false; }
+
+                if (notInThisPositionLetters[i].Contains(w))
+                {
+                    return false;
+                }
 
                 char known = knownPlaces[i];
                 if (known != '-' && known != w) { return false; }
@@ -150,17 +217,29 @@ namespace WordleSolver
             return true;
         }
 
-        
-
         private void PrintInfo()
         {
+            var solutions = "";
+            if (potentialSolutions.Count < 10)
+            {
+                solutions = "(";
+                foreach (var sol in potentialSolutions)
+                {
+                    solutions += sol + ", ";
+                }
+                solutions += ")";
+            }
+
             Print($"Known: {new string(knownPlaces)}, Unpositioned: {new string(unpositionedLetters.ToArray())}, Excluded: {new string(excludedLetters.ToArray())} \n" +
-                $"{potentialSolutions.Count} potential words.\n\n");
+                $"{potentialSolutions.Count} potential words. " + solutions + "\n\n");
+
         }
 
         private bool Guess(string guess)
         {
             Print($"Guessing " + guess + "");
+
+            guesses.Add(guess);
 
             if (guess == solution)
             {
@@ -180,6 +259,8 @@ namespace WordleSolver
 
                     continue;
                 }
+
+                notInThisPositionLetters[i].Add(guessChar);
 
                 if (solution.Contains(guessChar))
                 {
@@ -201,7 +282,7 @@ namespace WordleSolver
                 Console.WriteLine(msg);
             }
 
-            log.Add(msg);
+            Log.Add(msg);
         }
     }
 }
