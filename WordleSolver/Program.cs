@@ -8,18 +8,28 @@ namespace WordleSolver
     {
         static void Main(string[] args)
         {
-            List<int> results = new List<int>();
-            for (int i = 0; i < 100; i++)
+            bool oneGame = true;
+
+            if (oneGame)
             {
-                var game = new Game(false);
+                var game = new Game(true);
                 var run = game.Run();
-                results.Add(run);
             }
+            else
+            {
+                List<int> results = new List<int>();
+                for (int i = 0; i < 100; i++)
+                {
+                    var game = new Game(false);
+                    var run = game.Run();
+                    results.Add(run);
+                }
 
-            Console.WriteLine("Average:" + results.Average());
+                Console.WriteLine("Average:" + results.Average());
 
-            var numberBeaten = results.Where(r => r <= 6).Count();
-            Console.WriteLine("% beaten:" + ((100f * numberBeaten) / results.Count));
+                var numberBeaten = results.Where(r => r <= 6).Count();
+                Console.WriteLine("% beaten:" + ((100f * numberBeaten) / results.Count));
+            }
         }
     }
 
@@ -52,7 +62,7 @@ namespace WordleSolver
 
             for (int i = 0; i < 10; i++)
             {
-                var guessWord = i == 0 ? "roate" : potentialSolutions.SelectRandom();
+                var guessWord = ChooseGuess();
 
                 var correct = Guess(guessWord);
                 if (correct)
@@ -71,6 +81,41 @@ namespace WordleSolver
             }
 
             return 11;
+        }
+
+        private string ChooseGuess()
+        {
+            if(potentialSolutions.Count == 1)
+            {
+                return potentialSolutions.Single();
+            }
+
+            var bestWord = "";
+            var bestScore = 0;
+            foreach(var word in Words.allWords)
+            {
+                var score = 0;
+                if (word.Any(c => excludedLetters.Contains(c))) continue;
+
+                foreach (var potential in this.potentialSolutions)
+                {
+                    score += CompareWords(potential, word);
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestWord = word;
+                }
+            }
+
+            return bestWord;
+        }
+
+        public int CompareWords(string a, string b)
+        {
+            var differentLetters = a.Intersect(b);
+            return differentLetters.Count();
         }
 
         private void FilterWords()
@@ -104,6 +149,8 @@ namespace WordleSolver
 
             return true;
         }
+
+        
 
         private void PrintInfo()
         {
