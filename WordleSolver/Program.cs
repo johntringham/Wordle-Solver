@@ -14,15 +14,15 @@ namespace WordleSolver
 
             if (oneGame)
             {
-                var game = new Game(true, "taste");
+                var game = new Game(true, "fizzy");
                 var run = game.Run();
             }
             else
             {
                 ConcurrentBag<Game> results = new ConcurrentBag<Game>();
-                Parallel.For(0, Words.Solutions.Length / 3, (i) =>
+                Parallel.For(0, Words.Solutions.Length, (i) =>
                 {
-                    var solutionIndex = i * 3;
+                    var solutionIndex = i;
                     //if (solutionIndex == -1)
                     //{
                     //    solution = Words.Solutions.SelectRandom();
@@ -55,26 +55,54 @@ namespace WordleSolver
         }
     }
 
+    public class Knowledge
+    {
+        public string pretendSolution;
+
+        public char[] knownPlaces;
+        public HashSet<char> unpositionedLetters;
+        public HashSet<char> excludedLetters;
+        public HashSet<char>[] notInThisPositionLetters;
+
+        public HashSet<string> potentialSolutions;
+
+
+        public Knowledge(char[] knownPlaces, HashSet<char> unpositionedLetters, HashSet<char> excludedLetters, HashSet<char>[] notInThisPositionLetters)
+        {
+            this.knownPlaces = knownPlaces;
+            this.unpositionedLetters = unpositionedLetters;
+            this.excludedLetters = excludedLetters;
+            this.notInThisPositionLetters = notInThisPositionLetters;
+            this.potentialSolutions = new HashSet<string>();
+        }
+
+        public Knowledge (Knowledge baseKnowledge, string pretendSolution)
+        {
+            this.pretendSolution = pretendSolution;
+
+            this.knownPlaces = new string(baseKnowledge.knownPlaces).ToCharArray();
+            this.unpositionedLetters = new HashSet<char>(baseKnowledge.unpositionedLetters);
+            this.excludedLetters = new HashSet<char>(baseKnowledge.excludedLetters);
+            this.notInThisPositionLetters =
+                new HashSet<char>[6] {
+                new HashSet<char>(baseKnowledge.notInThisPositionLetters[0]),
+                new HashSet<char>(baseKnowledge.notInThisPositionLetters[1]),
+                new HashSet<char>(baseKnowledge.notInThisPositionLetters[2]),
+                new HashSet<char>(baseKnowledge.notInThisPositionLetters[3]),
+                new HashSet<char>(baseKnowledge.notInThisPositionLetters[4]),
+                new HashSet<char>(baseKnowledge.notInThisPositionLetters[5]),
+            };
+
+            this.potentialSolutions = new HashSet<string>(baseKnowledge.potentialSolutions);
+        }
+    }
+
     public class Game
     {
-        private string solution;
-
-        private char[] knownPlaces = "-----".ToCharArray();
-        private HashSet<char> unpositionedLetters = new HashSet<char>();
-        private HashSet<char> excludedLetters = new HashSet<char>();
-
-        private HashSet<char>[] notInThisPositionLetters = new HashSet<char>[6] {
-            new HashSet<char>(),
-            new HashSet<char>(),
-            new HashSet<char>(),
-            new HashSet<char>(),
-            new HashSet<char>(),
-            new HashSet<char>(),
-        };
+        private string realSolution;
 
         public HashSet<string> guesses = new HashSet<string>();
 
-        public HashSet<string> potentialSolutions;
         private bool shouldPrint;
 
         public List<string> Log = new List<string>();
@@ -82,23 +110,25 @@ namespace WordleSolver
         public Game(bool shouldPrint, string solution)
         {
             this.shouldPrint = shouldPrint;
-            this.solution = solution;
+            this.realSolution = solution;
         }
 
         public int steps = 0;
 
         public int Run()
         {
-            potentialSolutions = Words.Solutions.ToHashSet();
+            var knowledge = new Knowledge("-----".ToCharArray(), new HashSet<char>(), new HashSet<char>(), new HashSet<char>[6] { new HashSet<char>(), new HashSet<char>(), new HashSet<char>(), new HashSet<char>(), new HashSet<char>(), new HashSet<char>(), });
+            knowledge.potentialSolutions = Words.Solutions.ToHashSet();
 
-            Print("Solution is " + solution + "\n\n\n");
+            Print("Solution is " + realSolution + "\n\n\n");
 
             for (int i = 0; i < 10; i++)
             {
                 steps++;
-                var guessWord = i == 0 ? "oater" : ChooseGuess();
+                var guessWord = i == 0 ? "oater" : ChooseGuess(knowledge);
 
-                var correct = Guess(guessWord);
+                Print("Guessing " + guessWord);
+                var correct = Guess(guessWord, knowledge);
                 if (correct)
                 {
                     Print("Correct! Word is " + guessWord);
@@ -108,52 +138,87 @@ namespace WordleSolver
                 }
                 else
                 {
-                    FilterWords();
-                    PrintInfo();
+                    FilterWords(knowledge);
+                    PrintInfo(knowledge);
                 }
             }
 
             return steps;
         }
 
-        private string ChooseGuess()
+        private string ChooseGuess(Knowledge knowledge)
         {
-            if(potentialSolutions.Count == 1)
+            if(knowledge.potentialSolutions.Count <= 2)
             {
-                return potentialSolutions.Single();
+                return knowledge.potentialSolutions.First();
             }
 
             var bestWord = "";
-            var bestScore = -10000;
-            foreach(var word in Words.allWords)
+
+            if (knowledge.potentialSolutions.Count > 10)
             {
-                var score = 0;
-                //if (word.Any(c => excludedLetters.Contains(c))) score -= 1;
-                if (guesses.Contains(word)) continue;
-
-                foreach (var potential in this.potentialSolutions)
+                var bestScore = -10000;
+                foreach (var word in Words.allWords)
                 {
-                    score += CompareWords(potential, word);
+                    var score = 0;
+                    if (guesses.Contains(word)) continue;
 
-                    if(potential == word)
+                    foreach (var potential in knowledge.potentialSolutions)
                     {
-                        score += 1;
+                        score += CompareWords(potential, word, knowledge);
+
+                        if (potential == word)
+                        {
+                            score += 1;
+                        }
+                    }
+
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        bestWord = word;
                     }
                 }
-
-                if (score > bestScore)
+            }
+            else
+            {
+                var bestScore = 1000000;
+                foreach (var word in Words.allWords)
                 {
-                    bestScore = score;
-                    bestWord = word;
+                    var worstCaseCount = 0;
+                    foreach (var potential in knowledge.potentialSolutions)
+                    {
+                        var fakeKnowledge = new Knowledge(knowledge, potential);
+                        Guess(word, fakeKnowledge);
+                        FilterWords(fakeKnowledge);
+                        var count = fakeKnowledge.potentialSolutions.Count();
+                        if(count > worstCaseCount)
+                        {
+                            worstCaseCount = count;
+                        }
+                        if(worstCaseCount >= knowledge.potentialSolutions.Count())
+                        {
+                            goto skip;
+                        }
+                    }
+
+                    if(worstCaseCount < bestScore)
+                    {
+                        bestWord = word;
+                        bestScore = worstCaseCount;
+                    }
+
+                    skip:;
                 }
             }
+
 
             return bestWord;
         }
 
-        public int CompareWords(string a, string b)
+        public int CompareWords(string a, string b, Knowledge knowledge)
         {
-            return a.Intersect(b).Except(knownPlaces).Count();
+            return a.Intersect(b).Except(knowledge.knownPlaces).Count();
 
             //var h = new HashSet<char>(a);
 
@@ -180,36 +245,36 @@ namespace WordleSolver
             //return (differentLetters.Length) - (except.Length * 2);
         }
 
-        private void FilterWords()
+        private void FilterWords(Knowledge knowledge)
         {
-            var filteredPotentialWords = potentialSolutions.Where(w => FilterGuess(w)).ToHashSet();
+            var filteredPotentialWords = knowledge.potentialSolutions.Where(w => FilterGuess(w, knowledge)).ToHashSet();
 
-            potentialSolutions = filteredPotentialWords;
+            knowledge.potentialSolutions = filteredPotentialWords;
         }
 
-        public bool FilterGuess(string word)
+        public bool FilterGuess(string word, Knowledge knowledge)
         {
             var unpositionedCheckCount = 0;
             for (int i = 0; i < word.Length; i++)
             {
                 char w = word[i];
-                if(excludedLetters.Contains(w)) { return false; }
+                if(knowledge.excludedLetters.Contains(w)) { return false; }
 
-                if (notInThisPositionLetters[i].Contains(w))
+                if (knowledge.notInThisPositionLetters[i].Contains(w))
                 {
                     return false;
                 }
 
-                char known = knownPlaces[i];
+                char known = knowledge.knownPlaces[i];
                 if (known != '-' && known != w) { return false; }
 
-                if (unpositionedLetters.Contains(w))
+                if (knowledge.unpositionedLetters.Contains(w))
                 {
                     unpositionedCheckCount++;
                 }
             }
 
-            if(unpositionedCheckCount < unpositionedLetters.Count())
+            if(unpositionedCheckCount < knowledge.unpositionedLetters.Count())
             {
                 return false;
             }
@@ -217,33 +282,35 @@ namespace WordleSolver
             return true;
         }
 
-        private void PrintInfo()
+        private void PrintInfo(Knowledge knowledge)
         {
             var solutions = "";
-            if (potentialSolutions.Count < 10)
+            if (knowledge.potentialSolutions.Count < 10)
             {
                 solutions = "(";
-                foreach (var sol in potentialSolutions)
+                foreach (var sol in knowledge.potentialSolutions)
                 {
                     solutions += sol + ", ";
                 }
                 solutions += ")";
             }
 
-            Print($"Known: {new string(knownPlaces)}, Unpositioned: {new string(unpositionedLetters.ToArray())}, Excluded: {new string(excludedLetters.ToArray())} \n" +
-                $"{potentialSolutions.Count} potential words. " + solutions + "\n\n");
+            Print($"Known: {new string(knowledge.knownPlaces)}, Unpositioned: {new string(knowledge.unpositionedLetters.ToArray())}, Excluded: {new string(knowledge.excludedLetters.ToArray())} \n" +
+                $"{knowledge.potentialSolutions.Count} potential words. " + solutions + "\n\n");
 
         }
 
-        private bool Guess(string guess)
+        private bool Guess(string guess, Knowledge knowledge)
         {
-            Print($"Guessing " + guess + "");
+            //Print($"Guessing " + guess + "");
+
+            var solution = knowledge.pretendSolution ?? realSolution;
 
             guesses.Add(guess);
 
             if (guess == solution)
             {
-                knownPlaces = solution.ToCharArray();
+                knowledge.knownPlaces = solution.ToCharArray();
                 return true;
             }
 
@@ -254,21 +321,21 @@ namespace WordleSolver
                 
                 if (guessChar == solutionChar)
                 {
-                    knownPlaces[i] = guessChar;
+                    knowledge.knownPlaces[i] = guessChar;
                     //unpositionedLetters.Remove(guessChar);
 
                     continue;
                 }
 
-                notInThisPositionLetters[i].Add(guessChar);
+                knowledge.notInThisPositionLetters[i].Add(guessChar);
 
                 if (solution.Contains(guessChar))
                 {
-                    unpositionedLetters.Add(guessChar);
+                    knowledge.unpositionedLetters.Add(guessChar);
                 }
                 else
                 {
-                    excludedLetters.Add(guessChar);
+                    knowledge.excludedLetters.Add(guessChar);
                 }
             }
 
