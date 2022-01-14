@@ -10,11 +10,11 @@ namespace WordleSolver
     {
         static void Main(string[] args)
         {
-            bool oneGame = false;
+            bool oneGame = true;
 
             if (oneGame)
             {
-                var game = new Game(true, "fizzy");
+                var game = new Game(true, "moody");
                 var run = game.Run();
             }
             else
@@ -23,14 +23,8 @@ namespace WordleSolver
                 Parallel.For(0, Words.Solutions.Length, (i) =>
                 {
                     var solutionIndex = i;
-                    //if (solutionIndex == -1)
-                    //{
-                    //    solution = Words.Solutions.SelectRandom();
-                    //}
-                    //else
-                    //{
-                       var solution = Words.Solutions[solutionIndex % Words.Solutions.Length];
-                    //}
+                    var solution = Words.Solutions[solutionIndex % Words.Solutions.Length];
+                    
 
                     var game = new Game(false, solution);
                     var run = game.Run();
@@ -120,15 +114,15 @@ namespace WordleSolver
             var knowledge = new Knowledge("-----".ToCharArray(), new HashSet<char>(), new HashSet<char>(), new HashSet<char>[6] { new HashSet<char>(), new HashSet<char>(), new HashSet<char>(), new HashSet<char>(), new HashSet<char>(), new HashSet<char>(), });
             knowledge.potentialSolutions = Words.Solutions.ToHashSet();
 
-            Print("Solution is " + realSolution + "\n\n\n");
+            //Print("Solution is " + realSolution + "\n\n\n");
 
             for (int i = 0; i < 10; i++)
             {
                 steps++;
-                var guessWord = i == 0 ? "oater" : ChooseGuess(knowledge);
+                var guessWord = i == 0 ? "reais" : ChooseGuess(knowledge);
 
                 Print("Guessing " + guessWord);
-                var correct = Guess(guessWord, knowledge);
+                var correct = RealLifeGuess(guessWord, knowledge);
                 if (correct)
                 {
                     Print("Correct! Word is " + guessWord);
@@ -155,7 +149,7 @@ namespace WordleSolver
 
             var bestWord = "";
 
-            if (knowledge.potentialSolutions.Count > 10)
+            if (knowledge.potentialSolutions.Count > 20)
             {
                 var bestScore = -10000;
                 foreach (var word in Words.allWords)
@@ -182,33 +176,44 @@ namespace WordleSolver
             }
             else
             {
-                var bestScore = 1000000;
+                var bestScore = 1000000f;
+                //Parallel.ForEach(Words.allWords, word =>
                 foreach (var word in Words.allWords)
                 {
-                    var worstCaseCount = 0;
+                    //var worstCaseCount = 0;
+                    float totalSolutions = 0f;
                     foreach (var potential in knowledge.potentialSolutions)
                     {
                         var fakeKnowledge = new Knowledge(knowledge, potential);
                         Guess(word, fakeKnowledge);
                         FilterWords(fakeKnowledge);
                         var count = fakeKnowledge.potentialSolutions.Count();
-                        if(count > worstCaseCount)
-                        {
-                            worstCaseCount = count;
-                        }
-                        if(worstCaseCount >= knowledge.potentialSolutions.Count())
-                        {
-                            goto skip;
-                        }
+                        //if (count > worstCaseCount)
+                        //{
+                        //    worstCaseCount = count;
+                        //}
+                        //if (worstCaseCount >= knowledge.potentialSolutions.Count())
+                        //{
+                        //    goto skip;
+                        //}
+
+                        totalSolutions += count;
                     }
 
-                    if(worstCaseCount < bestScore)
+                    //if (worstCaseCount < bestScore)
+                    //{
+                    //    bestWord = word;
+                    //    bestScore = worstCaseCount;
+                    //}
+
+                    var average = totalSolutions / knowledge.potentialSolutions.Count();
+                    if (average < bestScore)
                     {
                         bestWord = word;
-                        bestScore = worstCaseCount;
+                        bestScore = average;
                     }
 
-                    skip:;
+                skip:;
                 }
             }
 
@@ -300,13 +305,69 @@ namespace WordleSolver
 
         }
 
+        private bool RealLifeGuess(string guess, Knowledge knowledge)
+        {
+            Print("Submit this as a guess:" + guess);
+
+            Print("Please type in the result as a BYG string:");
+
+            var response = Console.ReadLine().ToUpper();
+
+            for (int i = 0; i < response.Length; i++)
+            {
+                char responseLetter = response[i];
+                char guessChar = guess[i];
+
+                if (responseLetter == 'G')
+                {
+                    knowledge.knownPlaces[i] = guessChar;
+                    //unpositionedLetters.Remove(guessChar);
+
+                    continue;
+                }
+                else
+                {
+                    knowledge.notInThisPositionLetters[i].Add(guessChar);
+
+                    if (responseLetter == 'Y')
+                    {
+                        knowledge.unpositionedLetters.Add(guessChar);
+                    }
+                    else if (responseLetter == 'B')
+                    {
+                        knowledge.excludedLetters.Add(guessChar);
+                    }
+                    else
+                    {
+                        throw new ArgumentException("Should be a string in the format BGYBB");
+                    }
+                }
+            }
+
+            return response == "GGGGG";
+
+            //Console.WriteLine("Green letters:");
+            //var greenLetters = Console.ReadLine();
+
+            //knowledge.knownPlaces = greenLetters.ToCharArray();
+
+            //Console.WriteLine("Yellow letters:");
+            //var yellowLetters = Console.ReadLine();
+            //foreach(var y in yellowLetters)
+            //{
+            //    knowledge.unpositionedLetters.Add(y);
+            //}
+
+            //return false;
+        }
+
         private bool Guess(string guess, Knowledge knowledge)
         {
             //Print($"Guessing " + guess + "");
 
             var solution = knowledge.pretendSolution ?? realSolution;
 
-            guesses.Add(guess);
+            //guesses.Add(guess);
 
             if (guess == solution)
             {
